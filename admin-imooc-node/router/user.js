@@ -1,16 +1,30 @@
 const express = require('express')
 const Result = require('../models/Result')
-const { login } = require('../services/user')
+const { login, findUser } = require('../services/user')
 const { PWD_SALT, PRIVATE_KEY, JWT_EXPIRED } = require('../utils/constant')
-const { md5 } = require('../utils')
+const { md5, decoded } = require('../utils')
 const { body, validationResult } = require('express-validator')
 const boom = require('boom')
 const jwt = require('jsonwebtoken')
 
 const router = express.Router()
 
-router.get('/info', function (req, res, next) {
-    res.json('user info...')
+router.get('/info', function (req, res) {
+    const decode = decoded(req)
+    if (decode && decode.username) {
+        findUser('admin').then(user => {
+            console.log(user);
+            if (user) {
+                user.roles = [user.role]//加上这个就可以实现登录了
+                new Result(user, '用户信息查询成功').success(res)
+            } else {
+                new Result('用户信息查询失败').fail(res)
+            }
+        })
+    } else {
+        new Result('用户信息查询失败').fail(res)
+    }
+
 })
 
 router.post(
