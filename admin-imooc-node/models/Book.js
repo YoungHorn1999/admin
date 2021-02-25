@@ -1,5 +1,6 @@
 const { MIME_TYPE_EPUB, UPLOAD_URL, UPLOAD_PATH } = require('../utils/constant')
 const fs = require('fs')
+const Epub = require('../utils/epub')
 
 class Book {
     constructor(file, data) {
@@ -56,6 +57,28 @@ class Book {
 
     createBookFromData(data) {
 
+    }
+
+    parse() {
+        return new Promise((resolve, reject) => {
+            const bookPath = `${UPLOAD_PATH}${this.filePath}`
+            if (!fs.existsSync(bookPath)) {
+                reject(new Error('电子书不存在'))
+            }
+            const epub = new Epub(bookPath)
+            epub.on('error', err => {
+                reject(err)
+            })
+            epub.on('end', err => {
+                if (err) {
+                    reject(err)
+                } else {
+                    console.log(epub.metadata);
+                    resolve()
+                }
+            })
+            epub.parse()
+        })
     }
 }
 
