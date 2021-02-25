@@ -48,6 +48,7 @@ class Book {
         this.publisher = ''//出版社
         this.contents = []//目录
         this.cover = ''//封面图片URL
+        this.coverPath = ''//封面图片路径
         this.category = -1 //分类ID
         this.categoryText = ''//分类名称
         this.language = ''//语种
@@ -73,8 +74,38 @@ class Book {
                 if (err) {
                     reject(err)
                 } else {
-                    console.log(epub.metadata);
-                    resolve()
+                    console.log('epub end', epub.manifest);
+                    const {
+                        language,
+                        creator,
+                        creatorFileAs,
+                        title,
+                        cover,
+                        publisher
+                    } = epub.metadata
+                    if (!title) {
+                        reject(new Error('图书标题为空'))
+                    } else {
+                        this.title = title
+                        this.language = language || 'en'
+                        this.author = creator || creatorFileAs || 'unknown'
+                        this.publisher = publisher || 'unknown'
+                        this.rootFile = epub.rootFile
+                        const handleGetImage = (err, file, mimeType) => {
+                            if (err) {
+                                reject(err)
+                            } else {
+                                const suffix = mimeType.split('/')[1]
+                                const coverPath = `${UPLOAD_PATH}/img/${this.filename}.${suffix}`
+                                const coverUrl = `${UPLOAD_URL}/img/${this.filename}.${suffix}`
+                                fs.writeFileSync(coverPath, file, 'binary')
+                                this.coverPath = `/img/${this.filename}.${suffix}`
+                                this.cover = coverUrl
+                                resolve(this)
+                            }
+                        }
+                        epub.getImage(cover, handleGetImage)
+                    }
                 }
             })
             epub.parse()
