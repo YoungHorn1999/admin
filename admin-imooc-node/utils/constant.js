@@ -2,7 +2,7 @@ const { env } = require('./env')
 const UPLOAD_PATH = env === 'dev'
     ? '/Users/yuanhao05/upload/admin-upload-ebook'
     : '/root/upload/admin-upload/ebook'
-const UPLOAD_URL = 'http://localhost:8089'
+const UPLOAD_URL = 'http://localhost:8089/admin-upload-ebook'
 
 module.exports = {
     CODE_ERROR: -1,

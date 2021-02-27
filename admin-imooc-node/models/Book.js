@@ -1,6 +1,9 @@
 const { MIME_TYPE_EPUB, UPLOAD_URL, UPLOAD_PATH } = require('../utils/constant')
 const fs = require('fs')
 const Epub = require('../utils/epub')
+const xml2js = require('xml2js').parseString
+const { resolve } = require('path')
+const path = require('path')
 
 class Book {
     constructor(file, data) {
@@ -12,7 +15,6 @@ class Book {
     }
 
     createBookFromFile(file) {
-        console.log('createBookFromFile', file);
         const {
             destination,
             filename,
@@ -47,13 +49,14 @@ class Book {
         this.author = ''//作者
         this.publisher = ''//出版社
         this.contents = []//目录
+        this.contentsTree = []//树状目录结构
         this.cover = ''//封面图片URL
         this.coverPath = ''//封面图片路径
         this.category = -1 //分类ID
         this.categoryText = ''//分类名称
         this.language = ''//语种
         this.unzipUrl = unzipUrl //解压后文件夹链接
-        this.originalname = originalname//电子书文件的原名
+        this.originalName = originalname//电子书文件的原名
     }
 
     createBookFromData(data) {
@@ -74,7 +77,6 @@ class Book {
                 if (err) {
                     reject(err)
                 } else {
-                    console.log('epub end', epub.manifest);
                     const {
                         language,
                         creator,
@@ -104,12 +106,121 @@ class Book {
                                 resolve(this)
                             }
                         }
-                        epub.getImage(cover, handleGetImage)
+                        try {
+                            this.unzip()
+                            this.parseContents(epub).then(({ chapters, chapterTree }) => {
+                                this.contents = chapters
+                                this.contentsTree = chapterTree
+                                epub.getImage(cover, handleGetImage)
+                            })
+                        } catch (e) {
+                            reject(e)
+                        }
                     }
                 }
             })
             epub.parse()
         })
+    }
+
+    unzip() {
+        const AdmZip = require('adm-zip')
+        const zip = new AdmZip(Book.genPath(this.path))
+        zip.extractAllTo(Book.genPath(this.unzipPath), true)
+    }
+
+    parseContents(epub) {
+        function getNcxFilePath() {
+            const spine = epub && epub.spine
+            const manifest = epub && epub.manifest
+            const ncx = spine.toc && spine.toc.href
+            const id = spine.toc && spine.toc.id
+            if (ncx) {
+                return ncx
+            } else {
+                return manifest[id].href
+            }
+        }
+
+        function findParent(array, level = 0, pid = '') {
+            return array.map(item => {
+                item.level = level
+                item.pid = pid
+                if (item.navPoint && item.navPoint.length > 0) {
+                    item.navPoint = findParent(item.navPoint, level + 1, item['$'].id)
+                } else if (item.navPoint) {
+                    item.navPoint.level = level + 1
+                    item.navPoint.pid = item['$'].id
+                }
+                return item
+            })
+        }
+
+        function flatten(array) {
+            return [].concat(...array.map(item => {
+                if (item.navPoint && item.navPoint.length > 0) {
+                    return [].concat(item, ...flatten(item.navPoint))
+                } else if (item.navPoint) {
+                    return [].concat(item, item.navPoint)
+                }
+                return item
+            }))
+        }
+
+        const NcxFilePath = Book.genPath(`${this.unzipPath}/${getNcxFilePath()}`)
+        if (fs.existsSync(NcxFilePath)) {
+            return new Promise((resolve, reject) => {
+                const xml = fs.readFileSync(NcxFilePath, 'utf-8')
+                const dir = path.dirname(NcxFilePath).replace(UPLOAD_PATH, '')
+                const filename = this.filename
+                xml2js(xml, {
+                    explicitArray: false,
+                    ignoreAttrs: false
+                }, function (err, json) {
+                    if (err) {
+                        reject(err)
+                    } else {
+                        const navMap = json.ncx.navMap
+                        if (navMap.navPoint && navMap.navPoint.length > 0) {
+                            navMap.navPoint = findParent(navMap.navPoint)
+                            const newNavMap = flatten(navMap.navPoint)
+                            const chapters = []
+                            newNavMap.forEach((chapter, index) => {
+                                const src = chapter.content['$'].src
+                                chapter.text = `${UPLOAD_URL}${dir}/${src}`
+                                chapter.label = chapter.navLabel.text || ''
+                                chapter.navId = chapter['$'].id
+                                chapter.filename = filename
+                                chapter.order = index + 1
+                                chapters.push(chapter)
+                            })
+                            const chapterTree = []
+                            chapters.forEach(c => {
+                                c.children = []
+                                if (c.pid === '') {
+                                    chapterTree.push(c)
+                                } else {
+                                    const parent = chapters.find(_ => _.navId === c.pid)
+                                    parent.children.push(c)
+                                }
+                            })
+                            resolve({ chapters, chapterTree })
+                        } else {
+                            reject(new Error('目录解析失败，目录数为0'))
+                        }
+                    }
+                })
+            })
+        } else {
+            throw new Error('目录文件不存在')
+        }
+    }
+
+    static genPath(path) {
+        if (!path.startsWith('/')) {
+            path = `/${path}`
+        }
+        return `${UPLOAD_PATH}${path}`
     }
 }
 
